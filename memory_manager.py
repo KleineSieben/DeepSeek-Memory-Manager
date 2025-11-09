@@ -9,15 +9,54 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Bypass proxy for local connections
 os.environ['NO_PROXY'] = 'localhost,127.0.0.1,::1'
 
-# Configuration
-DISTILLATION_MODEL = "deepseek-r1:32b-qwen-distill-q4_K_M"
-EMBEDDING_MODEL = "nomic-embed-text"  # Lightweight local embedder
+DISTILLATION_MODEL = "deepseek-r1:32b-qwen-distill"  # Remove specific quantization
+EMBEDDING_MODEL = "nomic-embed-text"  # This is correct
 
 class SmartMemory:
+    def check_models_available(self):
+        """Robust model detection - handles different naming formats"""
+        try:
+            response = ollama.list()
+            print(f"🔍 Ollama response received")
+            
+            # Extract model names safely
+            if hasattr(response, 'models'):
+                installed_models = [getattr(model, 'model', '') for model in response.models]
+            elif 'models' in response:
+                installed_models = [model.get('model', model.get('name', '')) for model in response['models']]
+            else:
+                installed_models = [model.get('model', model.get('name', '')) for model in response]
+            
+            print(f"📋 Found models: {installed_models}")
+            
+            # Check models with flexible matching
+            distillation_models = [m for m in installed_models if DISTILLATION_MODEL in m]
+            embedding_models = [m for m in installed_models if EMBEDDING_MODEL in m]
+            
+            if distillation_models:
+                print(f"✅ Distillation model: {distillation_models[0]}")
+            else:
+                print(f"❌ Missing: {DISTILLATION_MODEL}")
+                
+            if embedding_models:
+                print(f"✅ Embedding model: {embedding_models[0]}")
+            else:
+                print(f"❌ Missing: {EMBEDDING_MODEL}")
+                
+            return len(distillation_models) > 0 and len(embedding_models) > 0
+            
+        except Exception as e:
+            print(f"❌ Cannot check models: {e}")
+            return False
+
     def __init__(self):
         self.memory_file = "smart_memories.json"
         self.memories = self.load_memories()
         
+        # Check models on startup
+        print("🔍 Checking required models...")
+        self.check_models_available()  # ← THIS MUST BE INSIDE __init__
+
     def load_memories(self):
         if os.path.exists(self.memory_file):
             with open(self.memory_file, 'r') as f:
@@ -32,10 +71,11 @@ class SmartMemory:
         """Get embedding using local Ollama model"""
         try:
             response = ollama.embed(model=EMBEDDING_MODEL, input=text)
-            return response['embeddings'][0]  # nomic-embed-text returns 768 dimensions
+            return response['embeddings'][0]
         except Exception as e:
-            print(f"Embedding error: {e}")
-            # Fallback: return random embedding of correct dimension (768 for nomic-embed-text)
+            print(f"❌ Embedding error: {e}")
+            print("💡 Check: Is Ollama running? Run 'ollama serve' in another window")
+            # Fallback: return random embedding
             return [0.0] * 768
     
     def create_distillation_prompt(self, user_msg, assistant_msg):
@@ -70,30 +110,37 @@ SUMMARY:
         return True
     
     def safe_distill(self, user_msg, assistant_msg, max_retries=2):
-        """Distill with retries and fallbacks"""
+        """Distill with better error handling and model selection"""
         for attempt in range(max_retries):
             try:
                 prompt = self.create_distillation_prompt(user_msg, assistant_msg)
-                response = ollama.generate(model=DISTILLATION_MODEL, prompt=prompt)
+                
+                # Get available models and use the first matching one
+                models = ollama.list()
+                available_models = [m['model'] for m in models.get('models', [])]
+                distillation_model = [m for m in available_models if 'deepseek-r1:32b-qwen-distill' in m][0]
+                
+                response = ollama.generate(model=distillation_model, prompt=prompt)
                 distilled = response['response'].strip()
                 
                 if self.quality_check(distilled):
-                    print(f"✓ Distillation successful (attempt {attempt + 1})")
+                    print(f"✓ Distillation successful")
                     return distilled
                 else:
-                    print(f"⚠ Distillation quality check failed, retrying...")
+                    print(f"⚠ Quality check failed, retrying...")
                     time.sleep(1)
                     
             except Exception as e:
                 print(f"❌ Distillation error (attempt {attempt + 1}): {e}")
                 time.sleep(2)
         
-        # Fallback: use a smart excerpt
+        # Fallback with clear explanation
         fallback = assistant_msg[:300] + "..." if len(assistant_msg) > 300 else assistant_msg
+        print("🔄 Using fallback (distillation unavailable)")
         return f"Key points: {fallback}"
     
     def save_conversation(self, user_message, assistant_response):
-        """Save conversation with smart distillation"""
+        """Save conversation with smart distillation - CORRECTED VERSION"""
         print("🧠 Distilling conversation...")
         distilled = self.safe_distill(user_message, assistant_response)
         
@@ -157,3 +204,73 @@ SUMMARY:
             else:
                 print(f"Has distilled: NO")
             print(f"Raw user preview: {memory.get('raw_user', 'MISSING')[:100]}...")
+
+    def search_memories(self):
+        """Search through stored memories"""
+        search_term = simpledialog.askstring("Search Memories", "Enter search term:")
+        if search_term:
+            relevant_memories = []
+            for memory in self.memory.memories:
+                if (search_term.lower() in memory.get('distilled', '').lower() or 
+                    search_term.lower() in memory.get('raw_user', '').lower()):
+                    relevant_memories.append(memory)
+            
+            if relevant_memories:
+                self.show_search_results(relevant_memories, search_term)
+            else:
+                messagebox.showinfo("Search Results", f"No memories found for '{search_term}'")
+
+    def show_search_results(self, memories, search_term):
+        """Display search results in a new window"""
+        results_window = tk.Toplevel(self.root)
+        results_window.title(f"Search Results for '{search_term}'")
+        results_window.geometry("800x600")
+        
+        text_area = scrolledtext.ScrolledText(results_window, wrap=tk.WORD)
+        text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        text_area.insert(tk.END, f"🔍 Found {len(memories)} memories for '{search_term}':\n\n")
+        
+        for i, memory in enumerate(memories, 1):
+            text_area.insert(tk.END, f"🧠 MEMORY {i}:\n")
+            text_area.insert(tk.END, f"📅 {memory['timestamp']}\n")
+            text_area.insert(tk.END, f"💡 {memory.get('distilled', 'NOT DISTILLED')}\n")
+            text_area.insert(tk.END, "="*70 + "\n\n")
+
+    def create_backup(self):
+        """Create a backup of memories"""
+        import shutil
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f"smart_memories_backup_{timestamp}.json"
+        
+        try:
+            shutil.copy2(self.memory_file, backup_file)
+            messagebox.showinfo("Backup Created", f"Backup saved as: {backup_file}")
+        except Exception as e:
+            messagebox.showerror("Backup Failed", f"Could not create backup: {e}")
+
+    def system_health_check(self):
+        """Check the health of the entire system"""
+        health_report = []
+        
+        # Check memory count
+        health_report.append(f"📊 Memories stored: {len(self.memory.memories)}")
+        
+        # Check model availability
+        try:
+            models = ollama.list()
+            model_count = len(models.get('models', []))
+            health_report.append(f"🤖 Available models: {model_count}")
+        except:
+            health_report.append("❌ Cannot connect to Ollama")
+        
+        # Check file health
+        if os.path.exists(self.memory.memory_file):
+            file_size = os.path.getsize(self.memory.memory_file)
+            health_report.append(f"💾 Memory file size: {file_size} bytes")
+        else:
+            health_report.append("❌ Memory file missing")
+        
+        messagebox.showinfo("System Health", "\n".join(health_report))
