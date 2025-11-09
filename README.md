@@ -1,38 +1,25 @@
-\# DeepSeek Memory Manager
+# SMART DeepSeek Memory Manager
 
+A desktop application that enhances your DeepSeek AI conversations with persistent memory and smart conversation distillation.
 
+## Features
 
-Local AI memory system that makes DeepSeek remember your conversations.
+- 🧠 **Smart Conversation Distillation** - Uses local Ollama models to extract key insights
+- 💾 **Persistent Memory Storage** - Vector-based semantic search across all conversations  
+- 🌐 **Browser Integration** - Automatic conversation capture from DeepSeek web interface
+- 🎨 **GUI Interface** - Easy-to-use Tkinter-based desktop app
 
+## Setup
 
+1. **Install Python dependencies:**
+   ```bash
+   pip install -r requirements.txt
 
-\## Features
+2. Install Ollama and required models:
 
-\-  Smart conversation distillation using local AI
+ollama pull deepseek-r1:32b-qwen-distill
+ollama pull nomic-embed-text
 
-\-  Semantic search through past chats  
+3.Run the application
 
-\-  Enhanced prompts for context-aware responses
-
-\-  100% local - no data sent to clouds
-
-
-
-\## Quick Start
-
-1\. Install requirements: `pip install -r requirements.txt`
-
-2\. Run: `python smart\_app.py`
-
-3\. Save conversations, get smarter AI responses!
-
-
-
-\## For DeepSeek Team
-
-I built the memory feature your users are asking for. Let's talk!
-
-
-
-The above is generated, me-Kleine Sieben(alias)don't know what to write in this right now, I'll refine it later.
-
+python smart_app.py
